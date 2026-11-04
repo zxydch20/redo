@@ -1,0 +1,968 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>记账存钱看板</title>
+<!-- Firebase SDK (compat) -->
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
+<style>
+  :root{
+    --bg:#0f172a;--panel:#1e293b;--panel-2:#273449;--text:#e2e8f0;--muted:#94a3b8;
+    --accent:#38bdf8;--accent-2:#22d3ee;--success:#4ade80;--warning:#fbbf24;--danger:#f87171;--border:#334155;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding-bottom:80px;max-width:520px;margin-left:auto;margin-right:auto;}
+  header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:var(--bg);z-index:10;}
+  header h1{font-size:18px;margin:0;background:linear-gradient(90deg,var(--accent),var(--accent-2));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;}
+  .cloud-status{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;}
+  .cloud-dot{width:8px;height:8px;border-radius:50%;background:var(--success);box-shadow:0 0 6px var(--success);}
+  .cloud-dot.offline{background:var(--danger);box-shadow:0 0 6px var(--danger);}
+  .cloud-dot.syncing{background:var(--warning);box-shadow:0 0 6px var(--warning);animation:pulse 1s infinite;}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+  nav{position:fixed;bottom:0;left:0;right:0;max-width:520px;margin:auto;background:var(--panel);border-top:1px solid var(--border);display:flex;z-index:20;}
+  nav button{flex:1;background:none;border:none;color:var(--muted);padding:10px 0 12px;font-size:12px;cursor:pointer;transition:color .2s;}
+  nav button.active{color:var(--accent);}
+  nav button .icon{display:block;font-size:18px;margin-bottom:2px;}
+  main{padding:16px 16px 0;}
+  .page{display:none;}
+  .page.active{display:block;}
+  .card{background:var(--panel);border-radius:14px;padding:16px;margin-bottom:14px;border:1px solid var(--border);}
+  .card h2{font-size:15px;margin:0 0 12px;color:var(--accent);display:flex;align-items:center;justify-content:space-between;}
+  .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
+  .stat-box{background:var(--panel-2);border-radius:10px;padding:12px;text-align:center;}
+  .stat-box .label{font-size:11px;color:var(--muted);margin-bottom:6px;}
+  .stat-box .value{font-size:18px;font-weight:700;color:var(--text);}
+  .stat-box .value.green{color:var(--success);}.stat-box .value.yellow{color:var(--warning);}.stat-box .value.red{color:var(--danger);}
+  .progress{height:10px;background:var(--panel-2);border-radius:6px;overflow:hidden;margin-top:6px;}
+  .progress-bar{height:100%;border-radius:6px;transition:width .3s;}
+  .progress-row{margin-bottom:12px;}
+  .progress-row .row-head{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:3px;}
+  .progress-row .row-head .name{color:var(--text);font-weight:600;}
+  .btn{background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#062033;border:none;border-radius:10px;padding:12px 16px;font-size:14px;font-weight:700;cursor:pointer;width:100%;}
+  .btn.secondary{background:var(--panel-2);color:var(--text);}
+  .btn.danger{background:var(--danger);color:#fff;}
+  .btn.tiny{padding:5px 10px;font-size:12px;width:auto;border-radius:7px;font-weight:600;}
+  input,select{background:var(--panel-2);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);font-size:14px;width:100%;font-family:inherit;}
+  input:focus,select:focus{outline:none;border-color:var(--accent);}
+  .form-row{margin-bottom:10px;}
+  .form-row label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px;}
+  .week-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:8px;}
+  .week-nav button{background:var(--panel-2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:7px 12px;cursor:pointer;font-size:13px;}
+  .week-nav .week-label{font-size:13px;color:var(--muted);flex:1;text-align:center;}
+  .calendar{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin-bottom:10px;}
+  .calendar .dow{text-align:center;font-size:11px;color:var(--muted);padding:4px 0;}
+  .calendar .day{aspect-ratio:1;background:var(--panel-2);border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:12px;cursor:pointer;position:relative;border:1px solid transparent;overflow:hidden;}
+  .calendar .day.empty{background:transparent;cursor:default;}
+  .calendar .day.today{border-color:var(--accent);}
+  .calendar .day.has-expense{background:#1e3a5f;}
+  .calendar .day .day-num{font-weight:600;}
+  .calendar .day .day-amount{font-size:9px;color:var(--warning);margin-top:1px;}
+  .checkin-record{background:var(--panel-2);border-radius:10px;padding:12px;margin-bottom:8px;font-size:13px;}
+  .checkin-record .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;}
+  .checkin-record .top .date{color:var(--muted);font-size:12px;}
+  .checkin-record .alloc{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;}
+  .checkin-record .alloc b{color:var(--text);}
+  .checkin-record .alloc .s{color:var(--success);}.checkin-record .alloc .r{color:var(--warning);}.checkin-record .alloc .d{color:var(--accent);}.checkin-record .alloc .f{color:var(--muted);}
+  .expense-list{list-style:none;padding:0;margin:0;}
+  .expense-list li{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border);font-size:13px;}
+  .expense-list li:last-child{border-bottom:none;}
+  .expense-list .meta{display:flex;flex-direction:column;gap:2px;}
+  .expense-list .cat{color:var(--muted);font-size:11px;}
+  .expense-list .amt{font-weight:700;}
+  .expense-list .amt.income{color:var(--success);}
+  .expense-list .del{background:none;border:none;color:var(--danger);cursor:pointer;font-size:18px;padding:0 4px;margin-left:8px;}
+  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:center;justify-content:center;z-index:100;padding:20px;}
+  .modal-overlay.show{display:flex;}
+  .modal{background:var(--panel);border-radius:14px;padding:20px;width:100%;max-width:380px;border:1px solid var(--border);}
+  .modal h3{margin:0 0 14px;font-size:16px;color:var(--accent);}
+  .paycheck-advice{background:var(--panel-2);border-radius:10px;padding:12px;margin:12px 0;font-size:13px;line-height:1.7;}
+  .paycheck-advice .highlight{color:var(--success);font-weight:700;}
+  .paycheck-advice .row{display:flex;justify-content:space-between;}
+  .savings-rate{font-size:30px;font-weight:800;text-align:center;background:linear-gradient(90deg,var(--accent),var(--accent-2));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;}
+  .empty-hint{text-align:center;color:var(--muted);font-size:13px;padding:16px 0;}
+  .rmb-summary{display:flex;gap:8px;margin-top:10px;}
+  .rmb-summary .rmb-box{flex:1;background:var(--panel-2);border-radius:8px;padding:10px;text-align:center;}
+  .rmb-summary .rmb-box .rmb-label{font-size:10px;color:var(--muted);margin-bottom:4px;}
+  .rmb-summary .rmb-box .rmb-val{font-size:14px;font-weight:700;}
+  .rmb-summary .rmb-box .rmb-val.green{color:var(--success);}
+  .rmb-summary .rmb-box .rmb-val.red{color:var(--danger);}
+  .rmb-summary .rmb-box .rmb-val.blue{color:var(--accent);}
+  /* SECTION: monthly-chart styles */
+  .monthly-chart-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:6px;}
+  .monthly-chart-wrap::-webkit-scrollbar{height:4px;}
+  .monthly-chart-wrap::-webkit-scrollbar-track{background:var(--panel-2);border-radius:2px;}
+  .monthly-chart-wrap::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+  .mc-inner{display:flex;align-items:flex-end;gap:6px;min-width:max-content;padding:0 2px;}
+  .mc-month{display:flex;flex-direction:column;align-items:center;min-width:68px;flex-shrink:0;}
+  .mc-bars{display:flex;align-items:flex-end;gap:4px;height:130px;}
+  .mc-bar-col{display:flex;flex-direction:column;align-items:center;gap:2px;}
+  .mc-bar{width:20px;border-radius:4px 4px 0 0;min-height:3px;transition:height .3s;}
+  .mc-bar-val{font-size:8px;color:var(--muted);white-space:nowrap;}
+  .mc-month-label{font-size:11px;color:var(--muted);margin-top:6px;white-space:nowrap;}
+  .mc-legend{display:flex;gap:14px;margin-bottom:10px;font-size:11px;color:var(--muted);}
+  .mc-legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:middle;}
+</style>
+</head>
+<body>
+<header>
+  <h1>记账存钱看板</h1>
+  <div class="cloud-status"><span class="cloud-dot syncing" id="cloudDot"></span><span id="cloudText">正在连接...</span></div>
+</header>
+<main>
+  <!-- SECTION: page-home -->
+  <section class="page active" id="page-home">
+    <div class="card">
+      <h2>发薪日打卡</h2>
+      <p style="font-size:12px;color:var(--muted);margin:0 0 10px">每两周周四发薪，金额约 $2,400 上下浮动，手动输入实际金额</p>
+      <button class="btn" id="btnPaycheck">发薪打卡</button>
+      <div id="homeUndoBox" style="margin-top:10px;display:none">
+        <button class="btn secondary" id="btnUndoLast">撤回最近一次发薪打卡</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>本周统计</h2>
+      <div class="week-nav">
+        <button id="homePrev">◀ 上一周</button>
+        <span class="week-label" id="homeWeekLabel"></span>
+        <button id="homeNext">下一周 ▶</button>
+      </div>
+      <div class="grid-2">
+        <div class="stat-box"><div class="label">本周已花（不含固定）</div><div class="value" id="homeWeekSpent">$0</div></div>
+        <div class="stat-box"><div class="label">剩余预算</div><div class="value green" id="homeWeekRemain">$0</div></div>
+        <div class="stat-box"><div class="label">固定支出(月)</div><div class="value yellow" id="homeFixed">$0</div></div>
+        <div class="stat-box"><div class="label">日均支出</div><div class="value" id="homeDailyAvg">$0</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>分类花费</h2>
+      <div class="week-nav">
+        <button id="catPrev">◀ 上一周</button>
+        <span class="week-label" id="catWeekLabel"></span>
+        <button id="catNext">下一周 ▶</button>
+      </div>
+      <div id="homeCategoryBars"></div>
+    </div>
+  </section>
+
+  <!-- SECTION: page-checkin -->
+  <section class="page" id="page-checkin">
+    <div class="card">
+      <h2>日历</h2>
+      <div class="week-nav">
+        <button id="calPrev">◀ 上月</button>
+        <span class="week-label" id="calLabel"></span>
+        <button id="calNext">下月 ▶</button>
+      </div>
+      <div class="calendar" id="calendar"></div>
+      <div style="font-size:11px;color:var(--muted);display:flex;gap:14px;flex-wrap:wrap"><span>蓝底=有支出</span><span>数字为当日总支出</span></div>
+    </div>
+    <!-- SECTION: monthly-chart card -->
+    <div class="card">
+      <h2>每月收支对比</h2>
+      <div class="mc-legend">
+        <span><i style="background:var(--success)"></i>收入</span>
+        <span><i style="background:var(--danger)"></i>支出</span>
+        <span><i style="background:var(--accent)"></i>结余</span>
+      </div>
+      <div class="monthly-chart-wrap" id="monthlyChartWrap">
+        <div class="mc-inner" id="monthlyChart"></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>发薪打卡记录</h2>
+      <div id="checkinList"></div>
+    </div>
+  </section>
+
+  <!-- SECTION: page-expense -->
+  <section class="page" id="page-expense">
+    <div class="card">
+      <h2>记一笔</h2>
+      <div class="form-row"><label>日期</label><input type="date" id="expDate" /></div>
+      <div class="form-row"><label>类型</label><select id="expType"><option value="expense">支出</option><option value="income">收入</option></select></div>
+      <div class="form-row"><label>分类</label><select id="expCategory">
+        <option value="食物">食物</option><option value="咖啡饮料">咖啡饮料</option><option value="交通">交通</option>
+        <option value="机动">机动</option><option value="固定支出">固定支出</option><option value="其他">其他</option>
+      </select></div>
+      <div class="form-row"><label>金额（$）</label><input type="number" id="expAmount" placeholder="0.00" step="0.01" min="0" /></div>
+      <div class="form-row"><label>备注</label><input type="text" id="expNote" placeholder="可选" /></div>
+      <button class="btn" id="btnAddExpense">保存</button>
+    </div>
+    <div class="card">
+      <h2>按周查看</h2>
+      <div class="week-nav">
+        <button id="expPrev">◀ 上一周</button>
+        <span class="week-label" id="expWeekLabel"></span>
+        <button id="expNext">下一周 ▶</button>
+      </div>
+      <ul class="expense-list" id="expenseList"></ul>
+    </div>
+  </section>
+
+  <!-- SECTION: page-stats -->
+  <section class="page" id="page-stats">
+    <div class="card" style="background:linear-gradient(135deg,#1e3a5f,#273449);border-color:var(--accent);">
+      <h2 style="color:var(--accent-2);">资产总览（人民币实时汇率）</h2>
+      <div style="text-align:center;margin:10px 0 6px;">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:4px">总攒钱 + 初始资金 + 人民币结余</div>
+        <div id="totalCNY" style="font-size:32px;font-weight:800;background:linear-gradient(90deg,var(--accent),var(--accent-2));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;">¥0</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:6px" id="exchangeRateInfo">汇率加载中...</div>
+      </div>
+      <div class="grid-3" style="margin-top:12px">
+        <div class="stat-box" style="background:rgba(56,189,248,0.1)"><div class="label">总攒钱(AUD)</div><div class="value" id="ovTotalSaved" style="font-size:14px">$0</div></div>
+        <div class="stat-box" style="background:rgba(56,189,248,0.1)"><div class="label">初始资金(AUD)</div><div class="value" id="ovInitFund" style="font-size:14px">$0</div></div>
+        <div class="stat-box" style="background:rgba(56,189,248,0.1)"><div class="label">人民币结余</div><div class="value" id="ovRmbBal" style="font-size:14px">¥0</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>年度目标进度</h2>
+      <div class="progress-row">
+        <div class="row-head"><span class="name">年度储蓄</span><span id="statSavingsText">$0 / $31,200</span></div>
+        <div class="progress"><div class="progress-bar" id="statSavingsBar" style="width:0%;background:var(--accent)"></div></div>
+      </div>
+      <div class="progress-row">
+        <div class="row-head"><span class="name">备用金</span><span id="statReserveText">$0 / $5,000</span></div>
+        <div class="progress"><div class="progress-bar" id="statReserveBar" style="width:0%;background:var(--warning)"></div></div>
+      </div>
+      <div class="progress-row">
+        <div class="row-head"><span class="name">累计总攒钱</span><span id="statTotalText">$0</span></div>
+        <div class="progress"><div class="progress-bar" id="statTotalBar" style="width:0%;background:var(--success)"></div></div>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">按自然年更新，进入新的一年时旧年度备用金自动转入累计总攒钱。</div>
+    </div>
+    <div class="card">
+      <h2>储蓄率 & 打卡</h2>
+      <div class="savings-rate" id="statSavingsRate">0%</div>
+      <div style="text-align:center;font-size:12px;color:var(--muted);margin-top:4px">储蓄率（已存 ÷ 总收入）</div>
+      <div class="grid-2" style="margin-top:12px">
+        <div class="stat-box"><div class="label">打卡次数</div><div class="value" id="statCheckinCount">0</div></div>
+        <div class="stat-box"><div class="label">总收入</div><div class="value green" id="statTotalIncome">$0</div></div>
+      </div>
+      <div class="grid-2" style="margin-top:10px">
+        <div class="stat-box"><div class="label">总支出</div><div class="value red" id="statTotalExpense">$0</div></div>
+        <div class="stat-box"><div class="label">净结余</div><div class="value" id="statNetBalance">$0</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>初始资金</h2>
+      <div class="form-row"><label>初始资金（$）</label><input type="number" id="initFundInput" placeholder="0" step="0.01" /></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn" id="btnSetInitFund" style="flex:1">设置</button>
+        <button class="btn secondary" id="btnUndoInitFund" style="flex:1">撤回</button>
+      </div>
+      <div style="font-size:12px;color:var(--muted);margin-top:8px" id="initFundStatus"></div>
+    </div>
+    <div class="card">
+      <h2>人民币收支明细 <button class="btn tiny" id="btnAddRmb" style="margin-left:auto">+ 添加</button></h2>
+      <div class="rmb-summary" id="rmbSummary">
+        <div class="rmb-box"><div class="rmb-label">总收入</div><div class="rmb-val green" id="rmbIncomeTotal">¥0</div></div>
+        <div class="rmb-box"><div class="rmb-label">总支出</div><div class="rmb-val red" id="rmbExpenseTotal">¥0</div></div>
+        <div class="rmb-box"><div class="rmb-label">结余</div><div class="rmb-val blue" id="rmbBalance">¥0</div></div>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:8px" id="rmbBalanceNote"></div>
+      <div id="rmbList" style="margin-top:10px"></div>
+    </div>
+    <div class="card">
+      <h2>云端同步</h2>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><span class="cloud-dot syncing" id="cloudDot2"></span><span id="cloudText2" style="font-size:13px">正在连接...</span></div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:8px" id="syncDetail"></div>
+      <button class="btn secondary" id="btnForceSync">强制同步</button>
+    </div>
+  </section>
+</main>
+<nav>
+  <button class="active" data-page="home"><span class="icon">🏠</span>首页</button>
+  <button data-page="checkin"><span class="icon">📅</span>打卡</button>
+  <button data-page="expense"><span class="icon">📝</span>记账</button>
+  <button data-page="stats"><span class="icon">📊</span>统计</button>
+</nav>
+
+<!-- SECTION: paycheck modal (with date field) -->
+<div class="modal-overlay" id="paycheckModal">
+  <div class="modal">
+    <h3>发薪打卡</h3>
+    <div class="form-row"><label>发薪日期</label><input type="date" id="payDate" /></div>
+    <div class="form-row"><label>本次发薪金额（$）</label><input type="number" id="payAmount" placeholder="2400" step="0.01" /></div>
+    <div class="paycheck-advice" id="payAdvice"></div>
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <button class="btn secondary" id="btnCancelPay" style="flex:1">取消</button>
+      <button class="btn" id="btnConfirmPay" style="flex:1">确认打卡</button>
+    </div>
+  </div>
+</div>
+
+<!-- SECTION: rmb modal -->
+<div class="modal-overlay" id="rmbModal">
+  <div class="modal">
+    <h3>添加人民币收支</h3>
+    <div class="form-row"><label>类型</label><select id="rmbType"><option value="income">收入</option><option value="expense">支出</option></select></div>
+    <div class="form-row"><label>金额（¥）</label><input type="number" id="rmbAmount" placeholder="0.00" step="0.01" /></div>
+    <div class="form-row"><label>备注</label><input type="text" id="rmbNote" placeholder="可选" /></div>
+    <div class="form-row"><label>日期</label><input type="date" id="rmbDate" /></div>
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <button class="btn secondary" id="btnCancelRmb" style="flex:1">取消</button>
+      <button class="btn" id="btnConfirmRmb" style="flex:1">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ================================================================
+   Firebase 配置与初始化
+   ================================================================ */
+var firebaseConfig = {
+  apiKey: "AIzaSyCXCfVK6F2WVYVlX8SO4JdppZOA2vDW1C4",
+  authDomain: "redo-87229.firebaseapp.com",
+  databaseURL: "https://redo-87229-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "redo-87229",
+  storageBucket: "redo-87229.firebasestorage.app",
+  messagingSenderId: "1029852835439",
+  appId: "1:1029852835439:web:14be9e8f5d8de33827a79a"
+};
+firebase.initializeApp(firebaseConfig);
+var fbDb = firebase.database();
+var fbRef = fbDb.ref('budgetBoard');
+
+var DEVICE_ID = localStorage.getItem('budget_device_id');
+if(!DEVICE_ID){
+  DEVICE_ID = 'dev_' + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+  localStorage.setItem('budget_device_id', DEVICE_ID);
+}
+
+/* ================================================================
+   数据层
+   ================================================================ */
+var KEY = 'budget_board_v5';
+var RESERVE_CAP = 5000, SAVE_CAP = 31200;
+var WEEK_CAP = {食物:115, 咖啡饮料:10, 交通:35, 机动:25};
+var FIXED_MONTH_CAP = 1240, WEEK_BUDGET = 185, PAY_RESERVE = 200, PAY_DAILY = 370, PAY_FIXED = 620;
+
+function loadLocal(){
+  try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch(e) { return {}; }
+}
+
+function ensureSchema(d){
+  if(!d.expenses) d.expenses = [];
+  if(!d.checkins) d.checkins = [];
+  if(!d.rmbTransactions) d.rmbTransactions = [];
+  if(!d.weekSettlements) d.weekSettlements = [];
+  if(d.initFund === undefined) d.initFund = 0;
+  return d;
+}
+
+var db = ensureSchema(loadLocal());
+/* v3 sync fix: 用 firstFire + lastWriteTs 替代 suppressListener */
+var fbReady = false;
+var firstFire = true;
+var lastWriteTs = 0;
+
+function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
+
+function mergeData(local, remote){
+  if(!remote || typeof remote !== 'object') return local;
+  var merged = ensureSchema(JSON.parse(JSON.stringify(local)));
+  ['expenses','checkins','rmbTransactions','weekSettlements'].forEach(function(key){
+    var map = {};
+    (merged[key] || []).forEach(function(item){ if(item && item.id) map[item.id] = item; });
+    (remote[key] || []).forEach(function(item){ if(item && item.id) map[item.id] = item; });
+    merged[key] = Object.keys(map).map(function(k){ return map[k]; });
+  });
+  if(remote.initFund !== undefined){
+    merged.initFund = Math.max(Number(merged.initFund||0), Number(remote.initFund||0));
+  }
+  merged._ts = Math.max(Number(local._ts||0), Number(remote._ts||0));
+  merged._device = DEVICE_ID;
+  return merged;
+}
+
+function saveLocal(){
+  db._ts = Date.now();
+  db._device = DEVICE_ID;
+  localStorage.setItem(KEY, JSON.stringify(db));
+}
+
+/* v3 sync fix: save() 记录写入时间戳，不再用 suppressListener */
+function save(){
+  saveLocal();
+  lastWriteTs = db._ts;
+  if(fbReady){
+    fbRef.set(db).then(function(){
+      updateCloudStatus('synced');
+    }).catch(function(err){
+      updateCloudStatus('error');
+      console.warn('Firebase write failed:', err);
+    });
+  }
+}
+
+function updateCloudStatus(state){
+  var dot = document.getElementById('cloudDot');
+  var dot2 = document.getElementById('cloudDot2');
+  var text = document.getElementById('cloudText');
+  var text2 = document.getElementById('cloudText2');
+  var detail = document.getElementById('syncDetail');
+  var cls, msg;
+  if(state === 'synced'){
+    cls = 'cloud-dot'; msg = '云端同步正常';
+  } else if(state === 'syncing'){
+    cls = 'cloud-dot syncing'; msg = '正在同步...';
+  } else if(state === 'error'){
+    cls = 'cloud-dot offline'; msg = '同步异常·数据本地保存';
+  } else {
+    cls = 'cloud-dot offline'; msg = '离线模式·数据本地保存';
+  }
+  dot.className = cls; dot2.className = cls;
+  text.textContent = msg; text2.textContent = msg;
+  if(detail) detail.textContent = '设备ID: ' + DEVICE_ID + ' · 最后同步: ' + new Date().toLocaleTimeString();
+}
+
+/* v3 sync fix: 只用 .on('value') 替代 .once() + .on()，消除监听盲区
+   用 firstFire + lastWriteTs 替代 suppressListener，防丢远端事件 */
+function initFirebaseSync(){
+  updateCloudStatus('syncing');
+  firstFire = true;
+
+  fbRef.on('value', function(snap){
+    var remote = snap.val();
+
+    /* 首次触发 = 初始加载：合并远程数据，推本地到 Firebase */
+    if(firstFire){
+      firstFire = false;
+      if(remote){
+        db = mergeData(db, remote);
+        saveLocal();
+        lastWriteTs = db._ts;
+      } else {
+        /* 远程为空，推送本地数据上去 */
+        lastWriteTs = db._ts;
+        fbRef.set(db).catch(function(){});
+      }
+      fbReady = true;
+      updateCloudStatus('synced');
+      renderAll();
+      return;
+    }
+
+    /* 后续触发：判断是否为本次设备自己写入的回声 */
+    var remoteTs = Number(remote && remote._ts || 0);
+    if(remoteTs <= lastWriteTs) return; /* 自己的回声或旧数据，跳过 */
+
+    /* 真正的远端变更：合并 + 再读一次确保拿到最新数据 */
+    db = mergeData(db, remote);
+    saveLocal();
+    lastWriteTs = db._ts;
+
+    /* 再读一次 Firebase，确保没有并发写入漏掉的数据 */
+    fbRef.once('value').then(function(freshSnap){
+      var fresh = freshSnap.val();
+      if(fresh && Number(fresh._ts||0) > Number(db._ts||0)){
+        db = mergeData(db, fresh);
+        saveLocal();
+        lastWriteTs = db._ts;
+      }
+      renderAll();
+      updateCloudStatus('synced');
+    }).catch(function(){
+      renderAll();
+      updateCloudStatus('synced');
+    });
+  }, function(err){
+    console.warn('Firebase listener error:', err);
+    fbReady = true;
+    updateCloudStatus('error');
+    renderAll();
+  });
+}
+
+/* v3 sync fix: 强制同步也改为先读再合并再写，避免覆盖远端新数据 */
+document.getElementById('btnForceSync').onclick = function(){
+  updateCloudStatus('syncing');
+  fbRef.once('value').then(function(snapshot){
+    var remote = snapshot.val();
+    if(remote){
+      db = mergeData(db, remote);
+    }
+    lastWriteTs = db._ts;
+    fbRef.set(db).then(function(){
+      updateCloudStatus('synced');
+      renderAll();
+    }).catch(function(){
+      updateCloudStatus('error');
+      renderAll();
+    });
+  }).catch(function(){
+    updateCloudStatus('error');
+  });
+};
+
+/* ================================================================
+   工具函数
+   ================================================================ */
+function money(n){ n = Number(n)||0; return '$'+n.toFixed(n%1?2:0); }
+function moneyCNY(n){ n = Number(n)||0; return '¥'+n.toFixed(n%1?2:0); }
+function pad(n){ return n<10 ? '0'+n : ''+n; }
+function ymd(d){ return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
+function monday(d){ var x=new Date(d); var g=(x.getDay()+6)%7; x.setDate(x.getDate()-g); x.setHours(0,0,0,0); return x; }
+function addDays(d,n){ var x=new Date(d); x.setDate(x.getDate()+n); return x; }
+function weekRange(offset){ var m=monday(new Date()); if(offset) m=addDays(m,offset*7); return {start:m,end:addDays(m,6)}; }
+
+/* SECTION: fix #1 - inRange 上界改为 < (不含下一天)，避免周一重复计入两周 */
+function inRange(dateStr,start,end){ var d=new Date(dateStr+'T00:00:00'); return d>=start && d<addDays(end,1); }
+
+function monthKey(dateStr){ return dateStr.slice(0,7); }
+function md(d){ return (d.getMonth()+1)+'/'+d.getDate(); }
+
+/* ================================================================
+   每周结余结算
+   ================================================================ */
+function settleWeeks(){
+  var today=new Date(); today.setHours(0,0,0,0);
+  var currentMon=monday(today);
+  var allDates=[];
+  db.expenses.forEach(function(e){ allDates.push(e.date); });
+  db.checkins.forEach(function(c){ allDates.push(c.date); });
+  if(!allDates.length) return;
+  allDates.sort();
+  var earliest=new Date(allDates[0]+'T00:00:00');
+  var startMon=monday(earliest);
+  var cursor=new Date(startMon);
+  while(cursor < currentMon){
+    var wkStart=new Date(cursor);
+    var wkEnd=addDays(cursor,6);
+    var wkKey=ymd(wkStart);
+    var alreadySettled=db.weekSettlements.some(function(ws){ return ws.weekStart===wkKey; });
+    if(!alreadySettled){
+      var weekSpent=0;
+      db.expenses.forEach(function(e){
+        if(e.type==='expense' && e.category!=='固定支出' && inRange(e.date,wkStart,wkEnd))
+          weekSpent += Number(e.amount);
+      });
+      var remainder=WEEK_BUDGET-weekSpent;
+      db.weekSettlements.push({weekStart:wkKey, spent:weekSpent, remainder:remainder});
+    }
+    cursor=addDays(cursor,7);
+  }
+}
+
+/* ================================================================
+   导航
+   ================================================================ */
+document.querySelectorAll('nav button').forEach(function(b){ b.onclick=function(){
+  document.querySelectorAll('nav button').forEach(function(x){ x.classList.remove('active'); });
+  b.classList.add('active');
+  document.querySelectorAll('.page').forEach(function(p){ p.classList.remove('active'); });
+  document.getElementById('page-'+b.dataset.page).classList.add('active');
+  renderAll();
+};});
+
+/* ================================================================
+   发薪打卡 (fix #2: 加入日期字段，支持补打卡)
+   ================================================================ */
+function advise(amount){
+  amount=Number(amount)||0;
+  var reserve=PAY_RESERVE, daily=PAY_DAILY, fixed=PAY_FIXED;
+  var save=amount-reserve-daily-fixed, deficit=0;
+  if(save<1200){ deficit=1200-save; save=1200; }
+  return {amount:amount, save:save, reserve:reserve, daily:daily, fixed:fixed, deficit:deficit};
+}
+function renderAdvice(){
+  var v=advise(document.getElementById('payAmount').value);
+  var h='<div class="row"><span>发薪金额</span><b>'+money(v.amount)+'</b></div>';
+  h+='<div class="row"><span>建议储蓄</span><b class="highlight">'+money(v.save)+'</b></div>';
+  h+='<div class="row"><span>备用金</span><b>'+money(v.reserve)+'</b></div>';
+  h+='<div class="row"><span>日用预算(两周)</span><b>'+money(v.daily)+'</b></div>';
+  h+='<div class="row"><span>固定支出</span><b>'+money(v.fixed)+'</b></div>';
+  if(v.deficit) h+='<div style="color:var(--danger);margin-top:6px">注意：金额低于 1200+固定，储蓄已补足至 1200（缺口 '+money(v.deficit)+'）</div>';
+  document.getElementById('payAdvice').innerHTML=h;
+}
+document.getElementById('btnPaycheck').onclick=function(){
+  document.getElementById('payAmount').value='';
+  /* fix #2: 默认填入今天日期，允许修改为过去日期以补打卡 */
+  document.getElementById('payDate').value=ymd(new Date());
+  renderAdvice();
+  document.getElementById('paycheckModal').classList.add('show');
+  setTimeout(function(){ document.getElementById('payAmount').focus(); },50);
+};
+document.getElementById('payAmount').oninput=renderAdvice;
+document.getElementById('btnCancelPay').onclick=function(){ document.getElementById('paycheckModal').classList.remove('show'); };
+document.getElementById('btnConfirmPay').onclick=function(){
+  var amount=Number(document.getElementById('payAmount').value);
+  if(!amount||amount<=0){ alert('请输入发薪金额'); return; }
+  /* fix #2: 使用用户选择的日期 */
+  var payDate=document.getElementById('payDate').value;
+  if(!payDate){ alert('请选择发薪日期'); return; }
+  var v=advise(amount);
+  db.checkins.push({id:uid(), date:payDate, amount:v.amount, save:v.save, reserve:v.reserve, daily:v.daily, fixed:v.fixed});
+  save(); document.getElementById('paycheckModal').classList.remove('show'); renderAll();
+};
+function undoCheckin(id){ db.checkins=db.checkins.filter(function(c){ return c.id!==id; }); save(); renderAll(); }
+document.getElementById('btnUndoLast').onclick=function(){
+  if(!db.checkins.length) return;
+  var last=db.checkins[db.checkins.length-1];
+  if(confirm('撤回最近一次发薪打卡（'+money(last.amount)+'）？打卡次数将 -1')) undoCheckin(last.id);
+};
+
+/* ================================================================
+   SECTION: fix #3 - 获取指定周的月份（用于固定支出统计）
+   ================================================================ */
+function weekMonthKey(r){
+  return r.start.getFullYear()+'-'+pad(r.start.getMonth()+1);
+}
+
+/* ================================================================
+   首页统计 (fix #1 & #3: 使用修复后的 inRange + 周所在月份)
+   ================================================================ */
+var homeWeekOff=0, catWeekOff=0;
+function renderHomeStats(){
+  var r=weekRange(homeWeekOff);
+  document.getElementById('homeWeekLabel').textContent=md(r.start)+' ~ '+md(r.end);
+  var spent=0, daysElapsed=0, today=new Date(); today.setHours(0,0,0,0);
+  for(var i=0;i<7;i++){ var d=addDays(r.start,i); if(d<=today) daysElapsed++; else break; }
+  db.expenses.forEach(function(e){
+    if(e.type==='expense' && e.category!=='固定支出' && inRange(e.date,r.start,r.end)) spent+=Number(e.amount);
+  });
+  var remain=WEEK_BUDGET-spent;
+  /* fix #3: 用当前查看周的月份，而非当前系统月份 */
+  var mkey=weekMonthKey(r), fixed=0;
+  db.expenses.forEach(function(e){
+    if(e.type==='expense' && e.category==='固定支出' && monthKey(e.date)===mkey) fixed+=Number(e.amount);
+  });
+  var avg=daysElapsed ? spent/daysElapsed : 0;
+  document.getElementById('homeWeekSpent').textContent=money(spent);
+  var remainEl=document.getElementById('homeWeekRemain');
+  remainEl.textContent=money(remain); remainEl.className='value '+(remain<0?'red':'green');
+  document.getElementById('homeFixed').textContent=money(fixed);
+  document.getElementById('homeDailyAvg').textContent=money(avg);
+}
+
+/* fix v2: 进度条统一颜色，超支变红 */
+function colorOf(c){ return 'var(--accent)'; }
+function bar(name,val,cap,color){
+  var pct=cap ? Math.min(100,val/cap*100) : 0;
+  /* fix v2: 超支变红色 */
+  var barColor=(cap && val>cap)?'var(--danger)':color;
+  return '<div class="progress-row"><div class="row-head"><span class="name">'+name+'</span><span>'+money(val)+' / '+money(cap)+'</span></div>'+
+    '<div class="progress"><div class="progress-bar" style="width:'+pct+'%;background:'+barColor+'"></div></div></div>';
+}
+function renderCatBars(){
+  var r=weekRange(catWeekOff);
+  document.getElementById('catWeekLabel').textContent=md(r.start)+' ~ '+md(r.end);
+  var sums={食物:0,咖啡饮料:0,交通:0,机动:0};
+  db.expenses.forEach(function(e){
+    if(e.type==='expense' && WEEK_CAP[e.category] && inRange(e.date,r.start,r.end)) sums[e.category]+=Number(e.amount);
+  });
+  /* fix #3: 用当前查看周的月份 */
+  var mkey=weekMonthKey(r), fixed=0;
+  db.expenses.forEach(function(e){
+    if(e.type==='expense' && e.category==='固定支出' && monthKey(e.date)===mkey) fixed+=Number(e.amount);
+  });
+  var html='';
+  ['食物','咖啡饮料','交通','机动'].forEach(function(c){ html+=bar(c,sums[c],WEEK_CAP[c],colorOf(c)); });
+  html+=bar('固定支出(月累计)',fixed,FIXED_MONTH_CAP,'var(--danger)');
+  document.getElementById('homeCategoryBars').innerHTML=html;
+}
+document.getElementById('homePrev').onclick=function(){ homeWeekOff--; renderHomeStats(); };
+document.getElementById('homeNext').onclick=function(){ homeWeekOff++; renderHomeStats(); };
+document.getElementById('catPrev').onclick=function(){ catWeekOff--; renderCatBars(); };
+document.getElementById('catNext').onclick=function(){ catWeekOff++; renderCatBars(); };
+
+/* ================================================================
+   日历
+   ================================================================ */
+var calOff=0;
+function renderCalendar(){
+  var base=new Date(); base.setDate(1); base.setMonth(base.getMonth()+calOff);
+  document.getElementById('calLabel').textContent=base.getFullYear()+'年'+(base.getMonth()+1)+'月';
+  var first=new Date(base.getFullYear(),base.getMonth(),1);
+  var lead=(first.getDay()+6)%7;
+  var daysInMonth=new Date(base.getFullYear(),base.getMonth()+1,0).getDate();
+  var daily={};
+  db.expenses.forEach(function(e){ if(e.type==='expense') daily[e.date]=(daily[e.date]||0)+Number(e.amount); });
+  var todayStr=ymd(new Date());
+  var html='';
+  ['一','二','三','四','五','六','日'].forEach(function(w){ html+='<div class="dow">'+w+'</div>'; });
+  for(var i=0;i<lead;i++) html+='<div class="day empty"></div>';
+  for(var day=1;day<=daysInMonth;day++){
+    var ds=base.getFullYear()+'-'+pad(base.getMonth()+1)+'-'+pad(day);
+    var cls='day'; if(ds===todayStr) cls+=' today'; if(daily[ds]) cls+=' has-expense';
+    var amt=daily[ds] ? '<div class="day-amount">'+Math.round(daily[ds])+'</div>' : '';
+    html+='<div class="'+cls+'"><div class="day-num">'+day+'</div>'+amt+'</div>';
+  }
+  document.getElementById('calendar').innerHTML=html;
+}
+
+/* ================================================================
+   SECTION: fix #4 - 每月收支对比柱状图（可横向滑动）
+   ================================================================ */
+function renderMonthlyChart(){
+  var months={};
+  /* 收集所有有数据的月份 */
+  db.checkins.forEach(function(c){
+    var mk=monthKey(c.date);
+    if(!months[mk]) months[mk]={income:0,expense:0};
+    months[mk].income+=Number(c.save)+Number(c.reserve)+Number(c.daily)+Number(c.fixed);
+  });
+  db.expenses.forEach(function(e){
+    var mk=monthKey(e.date);
+    if(!months[mk]) months[mk]={income:0,expense:0};
+    if(e.type==='income') months[mk].income+=Number(e.amount);
+    else months[mk].expense+=Number(e.amount);
+  });
+  /* 按月份排序 */
+  var keys=Object.keys(months).sort();
+  if(!keys.length){
+    document.getElementById('monthlyChart').innerHTML='<div class="empty-hint" style="width:100%">暂无数据</div>';
+    return;
+  }
+  /* 计算每月结余并找出最大值用于缩放 */
+  keys.forEach(function(mk){ months[mk].balance=months[mk].income-months[mk].expense; });
+  var maxVal=0;
+  keys.forEach(function(mk){
+    maxVal=Math.max(maxVal, months[mk].income, months[mk].expense, Math.abs(months[mk].balance));
+  });
+  if(maxVal===0) maxVal=1;
+  var maxH=100;
+  /* 构建柱状图 HTML */
+  var html='';
+  keys.forEach(function(mk){
+    var m=months[mk];
+    var incH=Math.max(3, m.income/maxVal*maxH);
+    var expH=Math.max(3, m.expense/maxVal*maxH);
+    var balAbs=Math.abs(m.balance);
+    var balH=Math.max(3, balAbs/maxVal*maxH);
+    var balColor=m.balance>=0?'var(--accent)':'var(--danger)';
+    var parts=mk.split('-');
+    var label=parts[0]+'/'+parts[1];
+    html+='<div class="mc-month">';
+    html+='<div class="mc-bars">';
+    html+='<div class="mc-bar-col"><div class="mc-bar-val">'+money(m.income)+'</div><div class="mc-bar" style="height:'+incH+'px;background:var(--success)"></div></div>';
+    html+='<div class="mc-bar-col"><div class="mc-bar-val">'+money(m.expense)+'</div><div class="mc-bar" style="height:'+expH+'px;background:var(--danger)"></div></div>';
+    html+='<div class="mc-bar-col"><div class="mc-bar-val" style="color:'+balColor+'">'+money(m.balance)+'</div><div class="mc-bar" style="height:'+balH+'px;background:'+balColor+'"></div></div>';
+    html+='</div>';
+    html+='<div class="mc-month-label">'+label+'</div>';
+    html+='</div>';
+  });
+  document.getElementById('monthlyChart').innerHTML=html;
+  /* 滚动到最右侧（最新月份） */
+  var wrap=document.getElementById('monthlyChartWrap');
+  setTimeout(function(){ wrap.scrollLeft=wrap.scrollWidth; },50);
+}
+
+/* ================================================================
+   打卡记录
+   ================================================================ */
+function renderCheckinList(){
+  var el=document.getElementById('checkinList');
+  if(!db.checkins.length){ el.innerHTML='<div class="empty-hint">暂无发薪打卡记录</div>'; return; }
+  var html='';
+  /* 按日期倒序排列 */
+  var sorted=db.checkins.slice().sort(function(a,b){ return a.date<b.date?1:a.date>b.date?-1:0; });
+  sorted.forEach(function(c){
+    html+='<div class="checkin-record"><div class="top"><span class="date">'+c.date+'</span><button class="btn danger tiny" data-id="'+c.id+'">撤回</button></div>'+
+      '<div class="alloc"><span>发薪 <b>'+money(c.amount)+'</b></span><span class="s">储蓄 <b>'+money(c.save)+'</b></span>'+
+      '<span class="r">备用 <b>'+money(c.reserve)+'</b></span><span class="d">日用 <b>'+money(c.daily)+'</b></span>'+
+      '<span class="f">固定 <b>'+money(c.fixed)+'</b></span></div></div>';
+  });
+  el.innerHTML=html;
+  el.querySelectorAll('button[data-id]').forEach(function(b){ b.onclick=function(){ undoCheckin(b.dataset.id); }; });
+}
+document.getElementById('calPrev').onclick=function(){ calOff--; renderCalendar(); };
+document.getElementById('calNext').onclick=function(){ calOff++; renderCalendar(); };
+
+/* ================================================================
+   记账 (fix #1: 使用修复后的 inRange)
+   ================================================================ */
+var expOff=0;
+function renderExpenseList(){
+  var r=weekRange(expOff);
+  document.getElementById('expWeekLabel').textContent=md(r.start)+' ~ '+md(r.end);
+  var items=db.expenses.filter(function(e){ return inRange(e.date,r.start,r.end); }).sort(function(a,b){ return a.date<b.date?1:a.date>b.date?-1:0; });
+  var el=document.getElementById('expenseList');
+  if(!items.length){ el.innerHTML='<li class="empty-hint" style="border:none">本周暂无记录</li>'; return; }
+  var html='';
+  items.forEach(function(e){
+    var sign=e.type==='income'?'+':'-'; var cls=e.type==='income'?'amt income':'amt';
+    html+='<li><div class="meta"><span>'+e.date+' '+(e.note||'')+'</span><span class="cat">'+e.category+'</span></div>'+
+      '<span><span class="'+cls+'">'+sign+money(e.amount)+'</span><button class="del" data-id="'+e.id+'">×</button></span></li>';
+  });
+  el.innerHTML=html;
+  el.querySelectorAll('button[data-id]').forEach(function(b){ b.onclick=function(){ db.expenses=db.expenses.filter(function(x){ return x.id!==b.dataset.id; }); save(); renderAll(); }; });
+}
+document.getElementById('btnAddExpense').onclick=function(){
+  var date=document.getElementById('expDate').value;
+  var amount=Number(document.getElementById('expAmount').value);
+  if(!date){ alert('请选择日期'); return; }
+  if(!amount||amount<=0){ alert('请输入金额'); return; }
+  db.expenses.push({id:uid(), date:date, type:document.getElementById('expType').value, category:document.getElementById('expCategory').value, amount:amount, note:document.getElementById('expNote').value});
+  save(); document.getElementById('expAmount').value=''; document.getElementById('expNote').value=''; renderAll();
+};
+document.getElementById('expPrev').onclick=function(){ expOff--; renderExpenseList(); };
+document.getElementById('expNext').onclick=function(){ expOff++; renderExpenseList(); };
+
+/* ================================================================
+   人民币收支
+   ================================================================ */
+document.getElementById('btnAddRmb').onclick=function(){
+  document.getElementById('rmbAmount').value=''; document.getElementById('rmbNote').value='';
+  document.getElementById('rmbDate').value=ymd(new Date()); document.getElementById('rmbType').value='income';
+  document.getElementById('rmbModal').classList.add('show');
+  setTimeout(function(){ document.getElementById('rmbAmount').focus(); },50);
+};
+document.getElementById('btnCancelRmb').onclick=function(){ document.getElementById('rmbModal').classList.remove('show'); };
+document.getElementById('btnConfirmRmb').onclick=function(){
+  var amount=Number(document.getElementById('rmbAmount').value);
+  if(!amount||amount<=0){ alert('请输入有效金额'); return; }
+  db.rmbTransactions.push({
+    id:uid(), date:document.getElementById('rmbDate').value||ymd(new Date()),
+    type:document.getElementById('rmbType').value, amount:amount, note:document.getElementById('rmbNote').value||''
+  });
+  save(); document.getElementById('rmbModal').classList.remove('show'); renderAll();
+};
+
+function renderRmb(){
+  var list=db.rmbTransactions.slice().sort(function(a,b){ return a.date<b.date?1:a.date>b.date?-1:0; });
+  var incomeTotal=0, expenseTotal=0;
+  list.forEach(function(r){ if(r.type==='income') incomeTotal+=Number(r.amount); else expenseTotal+=Number(r.amount); });
+  var balance=incomeTotal-expenseTotal;
+  document.getElementById('rmbIncomeTotal').textContent=moneyCNY(incomeTotal);
+  document.getElementById('rmbExpenseTotal').textContent=moneyCNY(expenseTotal);
+  var balEl=document.getElementById('rmbBalance');
+  balEl.textContent=(balance>=0?'+':'')+moneyCNY(balance);
+  balEl.className='rmb-val '+(balance>=0?'blue':'red');
+  var noteEl=document.getElementById('rmbBalanceNote');
+  if(balance>0){ noteEl.textContent='结余 '+moneyCNY(balance)+' 已计入累计总攒钱'; noteEl.style.color='var(--success)'; }
+  else if(balance<0){ noteEl.textContent='人民币净支出 '+moneyCNY(Math.abs(balance))+'，未从总攒钱中扣除'; noteEl.style.color='var(--muted)'; }
+  else { noteEl.textContent='收支平衡'; noteEl.style.color='var(--muted)'; }
+  var container=document.getElementById('rmbList');
+  if(!list.length){ container.innerHTML='<div class="empty-hint">暂无人民币收支记录</div>'; return; }
+  var html='';
+  list.forEach(function(r){
+    var sign=r.type==='income'?'+':'-'; var cls=r.type==='income'?'amt income':'amt';
+    var typeBadge=r.type==='income'?'<span style="color:var(--success);font-size:11px;font-weight:600;margin-right:6px">收入</span>':'<span style="color:var(--danger);font-size:11px;font-weight:600;margin-right:6px">支出</span>';
+    html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px">';
+    html+='<div class="meta"><span>'+typeBadge+(r.date||'')+(r.note?' · '+r.note:'')+'</span></div>';
+    html+='<span><span class="'+cls+'">'+sign+'¥'+Number(r.amount).toFixed(2)+'</span><button class="del" data-rid="'+r.id+'">×</button></span></div>';
+  });
+  container.innerHTML=html;
+  container.querySelectorAll('button[data-rid]').forEach(function(b){
+    b.onclick=function(){ db.rmbTransactions=db.rmbTransactions.filter(function(x){ return x.id!==b.dataset.rid; }); save(); renderAll(); };
+  });
+}
+
+/* ================================================================
+   统计
+   ================================================================ */
+function renderStats(){
+  settleWeeks();
+  var year=new Date().getFullYear();
+  var yearSave=0, yearReserve=0, allSave=0, totalIncome=0, prevYearReserve=0;
+  db.checkins.forEach(function(c){
+    allSave+=Number(c.save); totalIncome+=Number(c.amount);
+    var cy=Number((c.date||'').slice(0,4));
+    if(cy===year){ yearSave+=Number(c.save); yearReserve+=Number(c.reserve); }
+    else if(cy<year){ prevYearReserve+=Number(c.reserve); }
+  });
+  /* fix v2: 总收入不含初始资金 */
+  var totalExpenseAmt=0;
+  db.expenses.forEach(function(e){ if(e.type==='expense') totalExpenseAmt+=Number(e.amount); });
+  var weekRemainderTotal=0;
+  db.weekSettlements.forEach(function(ws){ weekRemainderTotal+=Number(ws.remainder); });
+  var rmbIncome=0, rmbExpense=0;
+  db.rmbTransactions.forEach(function(r){ if(r.type==='income') rmbIncome+=Number(r.amount); else rmbExpense+=Number(r.amount); });
+  var rmbBalance=rmbIncome-rmbExpense;
+  /* fix v2: 累计总攒钱不算人民币结余 */
+  var totalSaved=allSave+prevYearReserve+weekRemainderTotal;
+
+  document.getElementById('statSavingsText').textContent=money(yearSave)+' / '+money(SAVE_CAP);
+  document.getElementById('statSavingsBar').style.width=Math.min(100,yearSave/SAVE_CAP*100)+'%';
+  var resV=Math.min(RESERVE_CAP,yearReserve);
+  document.getElementById('statReserveText').textContent=money(resV)+' / '+money(RESERVE_CAP);
+  document.getElementById('statReserveBar').style.width=Math.min(100,yearReserve/RESERVE_CAP*100)+'%';
+  document.getElementById('statTotalText').textContent=money(totalSaved);
+  document.getElementById('statTotalBar').style.width=Math.min(100,totalSaved/(SAVE_CAP+RESERVE_CAP)*100)+'%';
+  var rate=totalIncome>0?(allSave/totalIncome*100):0;
+  document.getElementById('statSavingsRate').textContent=rate.toFixed(1)+'%';
+  document.getElementById('statCheckinCount').textContent=db.checkins.length;
+  document.getElementById('statTotalIncome').textContent=money(totalIncome);
+  document.getElementById('statTotalExpense').textContent=money(totalExpenseAmt);
+  var netBalance=totalIncome-totalExpenseAmt;
+  var netEl=document.getElementById('statNetBalance');
+  netEl.textContent=money(netBalance); netEl.className='value '+(netBalance>=0?'green':'red');
+  document.getElementById('homeUndoBox').style.display=db.checkins.length?'block':'none';
+  document.getElementById('initFundStatus').textContent='当前初始资金：'+money(db.initFund||0);
+
+  document.getElementById('ovTotalSaved').textContent=money(totalSaved);
+  document.getElementById('ovInitFund').textContent=money(db.initFund||0);
+  var ovRmbBalEl=document.getElementById('ovRmbBal');
+  ovRmbBalEl.textContent=(rmbBalance>=0?'+':'')+moneyCNY(rmbBalance);
+  ovRmbBalEl.className='value '+(rmbBalance>=0?'green':'red');
+  fetchExchangeRate(totalSaved, Number(db.initFund||0), rmbBalance);
+}
+
+document.getElementById('btnSetInitFund').onclick=function(){
+  var v=Number(document.getElementById('initFundInput').value);
+  if(isNaN(v)||v<0){ alert('请输入有效金额'); return; }
+  db.initFund=v; save(); renderAll();
+};
+document.getElementById('btnUndoInitFund').onclick=function(){ db.initFund=0; document.getElementById('initFundInput').value=''; save(); renderAll(); };
+
+/* ================================================================
+   汇率换算
+   ================================================================ */
+var cachedRate=null, cachedRateTime=0;
+function fetchExchangeRate(audSaved, audInitFund, rmbBal){
+  var now=Date.now();
+  if(cachedRate && (now-cachedRateTime)<1800000){ applyRate(cachedRate, audSaved, audInitFund, rmbBal); return; }
+  document.getElementById('exchangeRateInfo').textContent='正在获取汇率...';
+  var xhr=new XMLHttpRequest();
+  xhr.open('GET','https://api.exchangerate-api.com/v4/latest/AUD',true);
+  xhr.timeout=8000;
+  xhr.onload=function(){
+    if(xhr.status===200){
+      try{ var data=JSON.parse(xhr.responseText); var rate=data.rates&&data.rates.CNY?data.rates.CNY:null;
+        if(rate){ cachedRate=rate; cachedRateTime=now; applyRate(rate,audSaved,audInitFund,rmbBal); return; }
+      }catch(e){}
+    }
+    fallbackRate(audSaved,audInitFund,rmbBal);
+  };
+  xhr.onerror=function(){ fallbackRate(audSaved,audInitFund,rmbBal); };
+  xhr.ontimeout=function(){ fallbackRate(audSaved,audInitFund,rmbBal); };
+  xhr.send();
+}
+function fallbackRate(audSaved,audInitFund,rmbBal){
+  if(!cachedRate) cachedRate=4.72;
+  applyRate(cachedRate,audSaved,audInitFund,rmbBal);
+}
+function applyRate(rate,audSaved,audInitFund,rmbBal){
+  var audTotal=audSaved+audInitFund;
+  var cnyFromAud=audTotal*rate;
+  var totalCNY=cnyFromAud+rmbBal;
+  document.getElementById('totalCNY').textContent='¥'+totalCNY.toFixed(totalCNY>=10000?0:2);
+  var time=new Date();
+  var ts=pad(time.getHours())+':'+pad(time.getMinutes());
+  document.getElementById('exchangeRateInfo').textContent='1 AUD = '+rate.toFixed(4)+' CNY · 更新于 '+ts;
+}
+
+/* ================================================================
+   网络状态监听
+   ================================================================ */
+window.addEventListener('online', function(){ if(fbReady) updateCloudStatus('synced'); else initFirebaseSync(); });
+window.addEventListener('offline', function(){ updateCloudStatus('offline'); });
+
+/* ================================================================
+   启动
+   ================================================================ */
+function renderAll(){
+  settleWeeks(); renderHomeStats(); renderCatBars(); renderCalendar();
+  renderCheckinList(); renderMonthlyChart(); renderExpenseList(); renderStats(); renderRmb();
+}
+document.getElementById('expDate').value=ymd(new Date());
+
+renderAll();
+initFirebaseSync();
+</script>
+</body>
+</html>
